@@ -31,8 +31,9 @@ plt.rcParams.update({"font.family": "Malgun Gothic",
                      "axes.unicode_minus": False})
 
 # ── 크롬 실행 파일·드라이버 경로 (apt 패키지) ──────────
-CHROME_BIN   = "/usr/bin/chromium-browser"
-CHROMEDRIVER = "/usr/bin/chromedriver"
+CHROME_BIN     = "/usr/bin/chromium"
+CHROMEDRIVER   = "/usr/bin/chromedriver"
+
 
 def new_driver():
     opts = Options()
@@ -126,3 +127,4 @@ while True:
 
     plot_area.pyplot(fig)
     time.sleep(INTERVAL_SEC)
+
