@@ -153,8 +153,9 @@ def render():
 
     status = "정원 초과/만석" if current >= quota else "여석 있음"
     pct_display = current / quota * 100 if quota else 0
-    st.write(f"**상태:** {status}  |  **현재 수강률:** {pct_display:.0f}%")
+    st.write(f"**상태:** {status}  |  **현재 담은인원:** {pct_display:.0f}%")
 
 
 with placeholder.container():
     render()
+
