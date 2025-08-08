@@ -3,13 +3,13 @@
 # app.py — SNU 수강신청 실시간 모니터 (Streamlit + Playwright)
 #   • 과목코드/분반 입력 → 과목명과 (현재/정원) 막대그래프
 #   • 현재 ≥ 정원: 빨간색, 현재 < 정원: 파란색
-#   • 자동 새로고침 (st_autorefresh)
+#   • 자동 새로고침 (최대 10 초)
+#   • Playwright 브라우저는 한 번만 띄우고 캐싱 → 훨씬 빠름
 #   • 외부 브라우저 다운로드 없음: 시스템 /usr/bin/chromium 사용
 # -------------------------------------------------------------
 
-# 0) Playwright가 브라우저를 다운로드하지 않도록 전역 env 설정
 import os
-os.environ["PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD"] = "1"  # 매우 중요!
+os.environ["PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD"] = "1"  # 브라우저 다운로드 방지
 
 import re
 import datetime
@@ -28,11 +28,10 @@ SEM_VALUE = {
 SEM_NAME = {1: "1학기", 2: "여름학기", 3: "2학기", 4: "겨울학기"}
 
 TITLE_COL, CAP_COL, CURR_COL = 6, 13, 14
-PW_TIMEOUT = 15000  # ms
+PW_TIMEOUT = 8000  # ms (8 초)
 
-CHROMIUM_PATH = "/usr/bin/chromium"  # Streamlit Cloud 패키지로 설치됨
+CHROMIUM_PATH = "/usr/bin/chromium"  # Streamlit Cloud apt 패키지
 
-# ---------- Streamlit 페이지 설정 ----------
 st.set_page_config(page_title="SNU 수강신청 모니터", layout="wide")
 
 # ---------- 유틸 ----------
@@ -42,20 +41,15 @@ def _parse_int(txt: str) -> int:
 
 def _render_bar(title: str, current: int, quota: int):
     is_full = (current is not None and quota is not None and current >= quota)
-    color = "#e53935" if is_full else "#1e88e5"
+    color   = "#e53935" if is_full else "#1e88e5"
+    pct     = 0.0 if quota in (None, 0) else min(max(current or 0, 0) / quota * 100.0, 100.0)
+    label   = f"{title} ({current}/{quota})" if title else f"({current}/{quota})"
 
-    if quota in (None, 0):
-        pct = 0.0
-        quota = 0 if quota is None else quota
-    else:
-        pct = min(max(current or 0, 0) / quota * 100.0, 100.0)
-
-    label = f"{title} ({current}/{quota})" if title else f"({current}/{quota})"
     st.markdown(
         f"""
         <style>
         .bar-wrap {{ display:flex; align-items:center; gap:12px; }}
-        .bar-box  {{ position:relative; flex:1; height:28px; background:#eee; border-radius:8px; overflow:hidden; }}
+        .bar-box  {{ position:relative; flex:1; height:24px; background:#eee; border-radius:8px; overflow:hidden; }}
         .bar-fill {{ position:absolute; top:0; left:0; bottom:0; width:{pct:.2f}%; background:{color}; }}
         .bar-lab  {{ white-space:nowrap; font-weight:600; }}
         </style>
@@ -67,86 +61,71 @@ def _render_bar(title: str, current: int, quota: int):
         unsafe_allow_html=True
     )
 
-# ---------- Playwright 사용 ----------
-def _check_chromium():
-    """시스템 chromium 실행 가능 여부 확인 (처음 1회)."""
-    if not Path(CHROMIUM_PATH).is_file():
-        return "시스템에 /usr/bin/chromium 이 존재하지 않습니다."
-    try:
-        import subprocess, shlex
-        ver = subprocess.check_output(shlex.split(f"{CHROMIUM_PATH} --version"), text=True).strip()
-        return f"사용 브라우저: {ver}"
-    except Exception as e:
-        return f"chromium 실행 실패: {e}"
-
+# ---------- Playwright 캐싱 ----------
 @st.cache_resource(show_spinner=False)
-def verify_environment():
-    """환경 체크 결과를 반환해 UI에 표시."""
-    return _check_chromium()
+def get_browser():
+    """한 번만 Chromium을 띄워서 재사용."""
+    if not Path(CHROMIUM_PATH).is_file():
+        raise RuntimeError("/usr/bin/chromium 이 설치되어 있지 않습니다. packages.txt 확인!")
 
-def fetch_info_playwright(year: int, sem_num: int, subject: str, cls: str):
-    """Playwright로 SNU 수강신청 페이지 조회 후 데이터 추출."""
-    with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            executable_path=CHROMIUM_PATH,
-            args=["--no-sandbox", "--disable-dev-shm-usage"],
-        )
-        context = browser.new_context(locale="ko-KR")
-        page = context.new_page()
+    pw = sync_playwright().start()
+    browser = pw.chromium.launch(
+        headless=True,
+        executable_path=CHROMIUM_PATH,
+        args=["--no-sandbox", "--disable-dev-shm-usage"],
+    )
+    return browser, pw  # Streamlit이 세션 종료 시 자동으로 정리
 
-        BASE_URL = "https://shine.snu.ac.kr/uni/sugang/cc/cc100.action"
-        page.goto(BASE_URL, wait_until="domcontentloaded")
+def fetch_info(year: int, sem_num: int, subject: str, cls: str):
+    browser, _ = get_browser()
+    context = browser.new_context(locale="ko-KR")
+    page    = context.new_page()
 
-        # 검색 조건 주입 후 fnInquiry() 호출
-        page.wait_for_selector("#srchOpenSchyy", timeout=PW_TIMEOUT)
-        page.evaluate(
-            """([year, sem, code]) => {
-                document.getElementById('srchOpenSchyy').value = year;
-                document.getElementById('srchOpenShtm').value  = sem;
-                document.getElementById('srchSbjtCd').value    = code;
-                if (typeof fnInquiry === 'function') fnInquiry();
-            }""",
-            [str(year), SEM_VALUE[int(sem_num)], subject.strip()],
-        )
+    BASE_URL = "https://shine.snu.ac.kr/uni/sugang/cc/cc100.action"
+    page.goto(BASE_URL, wait_until="domcontentloaded")
 
-        # 결과 테이블 로드
-        page.wait_for_selector("table.tbl_basic tbody tr", timeout=PW_TIMEOUT)
+    page.wait_for_selector("#srchOpenSchyy", timeout=PW_TIMEOUT)
+    page.evaluate(
+        """([year, sem, code]) => {
+            document.getElementById('srchOpenSchyy').value = year;
+            document.getElementById('srchOpenShtm').value  = sem;
+            document.getElementById('srchSbjtCd').value    = code;
+            if (typeof fnInquiry === 'function') fnInquiry();
+        }""",
+        [str(year), SEM_VALUE[int(sem_num)], subject.strip()],
+    )
 
-        rows = page.locator("table.tbl_basic tbody tr")
-        for i in range(rows.count()):
-            tds = rows.nth(i).locator("td")
-            if tds.count() <= CURR_COL:
-                continue
-            # 분반 매칭
-            if any(tds.nth(j).inner_text().strip() == cls.strip() for j in range(tds.count())):
-                cap_txt = tds.nth(CAP_COL).inner_text().strip()
-                m = re.search(r"\((\d+)\)", cap_txt)
-                quota = int(m.group(1)) if m else _parse_int(cap_txt)
-                current = _parse_int(tds.nth(CURR_COL).inner_text().strip())
-                title   = tds.nth(TITLE_COL).inner_text().strip()
-                context.close(); browser.close()
-                return quota, current, title
+    page.wait_for_selector("table.tbl_basic tbody tr", timeout=PW_TIMEOUT)
 
-        context.close(); browser.close()
-        return None, None, None  # 매칭 실패
+    rows = page.locator("table.tbl_basic tbody tr")
+    for i in range(rows.count()):
+        tds = rows.nth(i).locator("td")
+        if tds.count() <= CURR_COL:
+            continue
+        if any(tds.nth(j).inner_text().strip() == cls.strip() for j in range(tds.count())):
+            cap_txt = tds.nth(CAP_COL).inner_text().strip()
+            m = re.search(r"\((\d+)\)", cap_txt)
+            quota   = int(m.group(1)) if m else _parse_int(cap_txt)
+            current = _parse_int(tds.nth(CURR_COL).inner_text().strip())
+            title   = tds.nth(TITLE_COL).inner_text().strip()
+            context.close()
+            return quota, current, title
+
+    context.close()
+    return None, None, None
 
 # ---------- Streamlit UI ----------
-status_msg = verify_environment()
-if status_msg is not None:
-    st.info(status_msg)
-
-st.title("SNU 수강신청 실시간 모니터 (Playwright 버전)")
-st.caption("과목코드와 분반을 입력하면 현재/정원을 실시간 막대로 보여줘요.")
+st.title("SNU 수강신청 실시간 모니터")
+st.caption("과목코드/분반을 입력하면 현재/정원을 실시간 막대로 보여줘요.")
 
 with st.sidebar:
     st.subheader("검색 설정")
-    subject = st.text_input("과목코드", value="445.206", help="예) 445.206")
-    cls     = st.text_input("분반", value="002", help="예) 001, 002 … 정확히 입력")
+    subject = st.text_input("과목코드", value="445.206")
+    cls     = st.text_input("분반", value="002")
     year    = st.number_input("개설연도", value=DEFAULT_YEAR, step=1)
-    sem_num = st.selectbox("학기", options=[1,2,3,4], index=2, format_func=lambda i: SEM_NAME[i])
+    sem_num = st.selectbox("학기", [1,2,3,4], index=2, format_func=lambda i: SEM_NAME[i])
     auto    = st.checkbox("자동 새로고침", value=True)
-    interval = st.slider("새로고침(초)", 1, 30, value=2)
+    interval = st.slider("새로고침(초)", 1, 10, value=2)  # ← 최대 10 초로 제한
 
 # 자동 새로고침
 st_autorefresh = getattr(st, "autorefresh", None) or getattr(st, "st_autorefresh", None)
@@ -160,23 +139,22 @@ def render():
         st.info("왼쪽 사이드바에 과목코드와 분반을 입력하세요.")
         return
     try:
-        with st.spinner("불러오는 중..."):
-            quota, current, title = fetch_info_playwright(
-                int(year), int(sem_num), subject.strip(), cls.strip())
+        with st.spinner("조회 중..."):
+            quota, current, title = fetch_info(int(year), int(sem_num), subject, cls)
     except PWTimeout:
-        st.error("페이지 로딩이 너무 오래 걸렸습니다. 다시 시도해보세요.")
+        st.error("페이지 로딩이 8 초 안에 완료되지 않았습니다. 다시 시도해보세요.")
         return
     except Exception as e:
-        st.error(f"조회 중 오류: {e}")
+        st.error(f"조회 오류: {e}")
         return
 
     ts = datetime.datetime.now().strftime("%H:%M:%S")
     if quota is None:
-        st.error("행을 찾지 못했습니다. 과목코드/분반/학기를 확인하세요.")
+        st.error("행을 찾지 못했습니다. 입력을 확인하세요.")
         st.caption(f"마지막 갱신: {ts}")
         return
 
-    st.subheader(f"{int(year)}-{SEM_NAME[int(sem_num)]}")
+    st.subheader(f"{year}-{SEM_NAME[sem_num]}")
     _render_bar(title, current, quota)
     status = "정원 초과/만석" if current >= quota else "여석 있음"
     st.write(f"**상태:** {status}  |  **마지막 갱신:** {ts}")
