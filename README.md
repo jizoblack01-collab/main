@@ -4,7 +4,6 @@
 - 현재 ≥ 정원: 빨간색
 - 현재 < 정원: 파란색
 - 자동 새로고침 (기본 2초)
-- **Selenium/Chrome 드라이버 불필요** (requests + BeautifulSoup 사용)
 
 ## 설치
 ```bash
