@@ -1,3 +1,1 @@
-chromium
-chromium-driver       # (= /usr/bin/chromedriver)
-fonts-nanum           # 한글 글꼴
+
