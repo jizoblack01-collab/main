@@ -3,7 +3,7 @@
 # app.py — SNU 수강신청 실시간 모니터 (Streamlit + Selenium, 로컬 chromedriver)
 #   • 과목코드/분반 입력 → 과목명과 수강률(%) 막대그래프
 #   • 현재 ≥ 정원: 빨간색, 현재 < 정원: 파란색
-#   • 자동 새로고침 1–10 초
+#   • 자동 새로고침 1–10 초
 #   • 개설연도·학기 입력 제거 ‒ 상수(DEFAULT_YEAR, DEFAULT_SEM) 사용
 #   • chromedriver는 /usr/bin/chromedriver 등 로컬 바이너리 직접 사용
 # ---------------------------------------------------------------------
@@ -17,7 +17,7 @@ from selenium.webdriver.support import expected_conditions as EC
 
 # ---------- 기본 설정 ----------
 DEFAULT_YEAR = 2025      # 고정 연도
-DEFAULT_SEM  = 3         # 3 → 2학기, 학기 입력 UI 삭제
+DEFAULT_SEM  = 3         # 3 → 2학기
 
 SEM_VALUE = {
     1: "U000200001U000300001",
@@ -37,7 +37,7 @@ CHROMEDRIVER_CANDIDATES = [
     shutil.which("chromedriver"),
 ]
 
-# ---------- 드라이버 생성 ----------
+# ---------- 드라이버 ----------
 
 def create_driver(headless: bool = True):
     drv_path = next((p for p in CHROMEDRIVER_CANDIDATES if p and os.path.exists(p)), None)
@@ -113,9 +113,9 @@ st.title("SNU 수강신청 실시간 모니터")
 
 with st.sidebar:
     st.subheader("검색 설정")
-    subject = st.text_input("과목코드", value="445.206")
-    cls = st.text_input("분반", value="002")
-    auto = st.checkbox("자동 새로고침", True)
+    subject = st.text_input("과목코드", value="", placeholder="예시: 445.206")
+    cls     = st.text_input("분반", value="", placeholder="예시: 002")
+    auto    = st.checkbox("자동 새로고침", True)
     interval = st.slider("새로고침(초)", 1, 10, value=2)
     headless = st.checkbox("Headless 모드", True)
 
@@ -153,10 +153,8 @@ def render():
 
     status = "만석" if current >= quota else "여석 있음"
     pct_display = current / quota * 100 if quota else 0
-    st.write(f"**상태:** {status}  |  **현재 담은인원:** {pct_display:.0f}%")
+    st.write(f"**상태:** {status}  |  **현재 수강률:** {pct_display:.0f}%")
 
 
 with placeholder.container():
     render()
-
-
