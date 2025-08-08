@@ -1,3 +1,4 @@
-streamlit
-selenium==4.21.0
-matplotlib==3.8.2    # 3.8.x 는 Py3.11 wheel 제공
+streamlit==1.37.1
+requests>=2.31.0
+beautifulsoup4>=4.12.2
+lxml>=5.2.2
