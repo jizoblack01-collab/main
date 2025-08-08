@@ -92,4 +92,56 @@ def fetch_info(year: int, sem_num: int, subject: str, cls: str):
     rows = soup2.select("table.tbl_basic tbody tr")
     for tr in rows:
         tds = tr.find_all("td")
-        if l
+        if len(tds) <= CURR_COL:
+            continue
+        if any(td.get_text(strip=True) == cls.strip() for td in tds):
+            cap_txt = tds[CAP_COL].get_text(" ", strip=True)
+            m = re.search(r"\((\d+)\)", cap_txt)
+            quota   = int(m.group(1)) if m else _parse_int(cap_txt)
+            current = _parse_int(tds[CURR_COL].get_text(" ", strip=True))
+            title   = tds[TITLE_COL].get_text(" ", strip=True)
+            return quota, current, title
+    return None, None, None  # 매칭 실패
+
+# -------------------- Streamlit UI --------------------
+st.set_page_config(page_title="SNU 수강신청 모니터", layout="wide")
+st.title("SNU 수강신청 실시간 모니터 (Requests 버전)")
+
+with st.sidebar:
+    st.subheader("검색 설정")
+    subject = st.text_input("과목코드", value="445.206")
+    cls     = st.text_input("분반", value="002")
+    year    = st.number_input("개설연도", value=DEFAULT_YEAR, step=1)
+    sem_num = st.selectbox("학기", [1,2,3,4], index=2, format_func=lambda i: SEM_NAME[i])
+    auto    = st.checkbox("자동 새로고침", value=True)
+    interval = st.slider("새로고침(초)", 1, 10, value=2)  # 최대 10 초
+
+# 자동 새로고침
+st_autorefresh = getattr(st, "autorefresh", None) or getattr(st, "st_autorefresh", None)
+if auto and st_autorefresh:
+    st_autorefresh(interval=int(interval) * 1000, key="auto_refresh_key_requests")
+
+placeholder = st.empty()
+
+def render():
+    if not subject.strip() or not cls.strip():
+        st.info("왼쪽 사이드바에 과목코드와 분반을 입력하세요.")
+        return
+
+    try:
+        with st.spinner("조회 중..."):
+            quota, current, title = fetch_info(int(year), int(sem_num), subject, cls)
+    except Exception as e:
+        st.error(f"요청 실패: {e}")
+        return
+
+    ts = datetime.datetime.now().strftime("%H:%M:%S")
+    if quota is None:
+        st.error("행을 찾지 못했습니다. 입력을 확인하세요.")
+        st.caption(f"마지막 갱신: {ts}")
+        return
+
+    st.subheader(f"{year}-{SEM_NAME[sem_num]}")
+    _render_bar(title, current, quota)
+    status = "정원 초과/만석" if current >= quota else "여석 있음"
+    st.write(f"**상태:** {status}  |  **마지막 갱신**
