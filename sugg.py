@@ -4,7 +4,7 @@
 #   • 과목코드/분반 입력 → 과목명과 (현재/정원) 막대그래프
 #   • 현재 ≥ 정원: 빨간색, 현재 < 정원: 파란색
 #   • 자동 새로고침 1–10 초
-#   • 브라우저/드라이버/Playwright 전혀 사용하지 않음
+#   • 브라우저/드라이버/Playwright 불필요
 # -------------------------------------------------------------
 
 import re, datetime, requests, streamlit as st
@@ -58,23 +58,21 @@ def _render_bar(title: str, current: int, quota: int):
         unsafe_allow_html=True
     )
 
-# -------------------- 데이터 fetch --------------------
+# -------------------- 세션 캐싱 --------------------
 @st.cache_resource(show_spinner=False)
 def get_session():
-    """세션을 한 번만 생성해 쿠키 재사용 → 평균 응답 0.3 s."""
-    s = requests.Session()
-    s.headers.update(HEADERS)
-    return s
+    sess = requests.Session()
+    sess.headers.update(HEADERS)
+    return sess
 
+# -------------------- 데이터 fetch --------------------
 def fetch_info(year: int, sem_num: int, subject: str, cls: str):
     sess = get_session()
 
-    # 1) 첫 GET (hidden 필드 수집)
     r = sess.get(BASE_URL, timeout=TIMEOUT)
     r.raise_for_status()
     soup = BeautifulSoup(r.text, "lxml")
 
-    # 2) 폼 필드 모으기
     payload = {inp.get("name"): inp.get("value", "")
                for inp in soup.select("form input") if inp.get("name")}
     payload.update({
@@ -83,14 +81,11 @@ def fetch_info(year: int, sem_num: int, subject: str, cls: str):
         "srchSbjtCd"   : subject.strip(),
     })
 
-    # 3) POST 조회
     r2 = sess.post(BASE_URL, data=payload, timeout=TIMEOUT)
     r2.raise_for_status()
     soup2 = BeautifulSoup(r2.text, "lxml")
 
-    # 4) 테이블 파싱
-    rows = soup2.select("table.tbl_basic tbody tr")
-    for tr in rows:
+    for tr in soup2.select("table.tbl_basic tbody tr"):
         tds = tr.find_all("td")
         if len(tds) <= CURR_COL:
             continue
@@ -101,7 +96,7 @@ def fetch_info(year: int, sem_num: int, subject: str, cls: str):
             current = _parse_int(tds[CURR_COL].get_text(" ", strip=True))
             title   = tds[TITLE_COL].get_text(" ", strip=True)
             return quota, current, title
-    return None, None, None  # 매칭 실패
+    return None, None, None
 
 # -------------------- Streamlit UI --------------------
 st.set_page_config(page_title="SNU 수강신청 모니터", layout="wide")
@@ -114,12 +109,11 @@ with st.sidebar:
     year    = st.number_input("개설연도", value=DEFAULT_YEAR, step=1)
     sem_num = st.selectbox("학기", [1,2,3,4], index=2, format_func=lambda i: SEM_NAME[i])
     auto    = st.checkbox("자동 새로고침", value=True)
-    interval = st.slider("새로고침(초)", 1, 10, value=2)  # 최대 10 초
+    interval = st.slider("새로고침(초)", 1, 10, value=2)
 
-# 자동 새로고침
 st_autorefresh = getattr(st, "autorefresh", None) or getattr(st, "st_autorefresh", None)
 if auto and st_autorefresh:
-    st_autorefresh(interval=int(interval) * 1000, key="auto_refresh_key_requests")
+    st_autorefresh(interval=int(interval) * 1000, key="auto_refresh_requests")
 
 placeholder = st.empty()
 
@@ -127,7 +121,6 @@ def render():
     if not subject.strip() or not cls.strip():
         st.info("왼쪽 사이드바에 과목코드와 분반을 입력하세요.")
         return
-
     try:
         with st.spinner("조회 중..."):
             quota, current, title = fetch_info(int(year), int(sem_num), subject, cls)
@@ -144,4 +137,7 @@ def render():
     st.subheader(f"{year}-{SEM_NAME[sem_num]}")
     _render_bar(title, current, quota)
     status = "정원 초과/만석" if current >= quota else "여석 있음"
-    st.write(f"**상태:** {status}  |  **마지막 갱신**
+    st.write(f"**상태:** {status}  |  **마지막 갱신:** {ts}")
+
+with placeholder.container():
+    render()
