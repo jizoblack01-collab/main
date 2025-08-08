@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-# ---------------------------------------------------------------------
-# app.py — SNU 수강신청 실시간 모니터 (Streamlit + Selenium, 오프라인 드라이버)
+# -------------------------------------------------------------
+# app.py — SNU 수강신청 실시간 모니터 (Streamlit + Selenium, 로컬 chromedriver)
 #   • 과목코드/분반 입력 → 과목명과 (현재/정원) 막대그래프
 #   • 현재 ≥ 정원: 빨간색, 현재 < 정원: 파란색
 #   • 자동 새로고침 1–10 초
-#   • webdriver-manager 제거 → /usr/bin/chromedriver 직접 사용
-# ---------------------------------------------------------------------
+#   • chromedriver는 /usr/bin/chromedriver 등 로컬 바이너리 직접 사용
+# -------------------------------------------------------------
 
-import re, datetime, streamlit as st, os, shutil
+import os, re, datetime, streamlit as st, shutil
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
@@ -23,7 +23,6 @@ SEM_VALUE = {
     4: "U000200002U000300002",
 }
 SEM_NAME = {1: "1학기", 2: "여름학기", 3: "2학기", 4: "겨울학기"}
-
 TITLE_COL, CAP_COL, CURR_COL = 6, 13, 14
 TIMEOUT = 10  # Selenium 대기시간(s)
 
@@ -34,12 +33,14 @@ CHROMEDRIVER_CANDIDATES = [
     shutil.which("chromedriver"),
 ]
 
-# ---------- 드라이버 생성 ----------
-@st.cache_resource(show_spinner=False)
-def get_driver(headless: bool = True):
+# ---------- 드라이버 생성 (캐싱 제거) ----------
+def create_driver(headless: bool = True):
     drv_path = next((p for p in CHROMEDRIVER_CANDIDATES if p and os.path.exists(p)), None)
     if not drv_path:
-        raise RuntimeError("chromedriver 경로를 찾지 못했습니다. packages.txt에 chromium-driver가 설치돼 있는지 확인!")
+        raise RuntimeError(
+            "chromedriver 경로를 찾지 못했습니다. "
+            "packages.txt에 chromium-driver가 설치돼 있는지 확인하세요."
+        )
 
     opts = webdriver.ChromeOptions()
     if headless:
@@ -119,7 +120,7 @@ with st.sidebar:
 
 st_autorefresh = getattr(st, "autorefresh", None) or getattr(st, "st_autorefresh", None)
 if auto and st_autorefresh:
-    st_autorefresh(interval=int(interval)*1000, key="auto_refresh_key")
+    st_autorefresh(interval=int(interval)*1000, key="auto_refresh")
 
 placeholder = st.empty()
 
@@ -128,7 +129,7 @@ def render():
         st.info("과목코드·분반을 입력하세요.")
         return
 
-    drv = get_driver(headless)
+    drv = create_driver(headless)
     try:
         with st.spinner("조회 중..."):
             open_and_search(drv, int(year), int(sem_num), subject)
