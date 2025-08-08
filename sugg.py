@@ -107,7 +107,7 @@ def render_bar(title, current, quota):
 
 # ---------- Streamlit UI ----------
 st.set_page_config(page_title="SNU 수강신청 모니터", layout="wide")
-st.title("SNU 수강신청 실시간 모니터 (Selenium·로컬 드라이버)")
+st.title("SNU 수강신청 실시간 모니터")
 
 with st.sidebar:
     subject = st.text_input("과목코드", value="445.206")
@@ -151,3 +151,4 @@ def render():
 
 with placeholder.container():
     render()
+
